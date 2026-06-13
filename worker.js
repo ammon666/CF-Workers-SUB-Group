@@ -1,12 +1,9 @@
-// ==================== CF-Workers-SUB-Group 多分组订阅方案（移除TG推送） ====================
+// ==================== CF-Workers-SUB-Group 多分组订阅方案（移除TG推送 & 移除订阅流量过期头） ====================
 
 
-// 全局基础配置
 let adminSecret = 'fallback-admin';
 let FileName = 'CF-Workers-SUB-Group';
 let SUBUpdateTime = 6;
-let total = 99;
-const EXPIRE_TIMESTAMP = 4102329600000;
 
 // 外部订阅导入配置
 let MainData = "";
@@ -16,9 +13,7 @@ let subProtocol = 'https';
 
 // 系统常量
 const KV_STORE_KEY = "SUB_GROUP_DATA";
-const TG_MSG_MAX_LEN = 3800;
 const FETCH_TIMEOUT = 2000;
-const BYTES_PER_TB = 1099511627776;
 
 export default {
 	async fetch(request, env) {
@@ -126,7 +121,7 @@ export default {
 				return await renderAdminPanel(request, env, groups, subBindList, urlObj);
 			}
 
-			// 非法访问管理路径拦截，移除TG推送
+			// 非法访问管理路径拦截
 			if (env.URL302) return Response.redirect(env.URL302, 302);
 			if (env.URL) return await proxyURL(env.URL, urlObj);
 			return new Response(await nginxDenied(), { status: 200, headers: { 'Content-Type': 'text/html; charset=UTF-8' } });
@@ -138,7 +133,7 @@ export default {
 		if (subTokenParam) {
 			matchedBind = subBindList.find(bind => bind.token === subTokenParam);
 		}
-		// 无匹配订阅绑定=权限不足，移除TG推送
+		// 无匹配订阅绑定=权限不足
 		if (!matchedBind) {
 			if (env.URL302) return Response.redirect(env.URL302, 302);
 			if (env.URL) return await proxyURL(env.URL, urlObj);
@@ -186,16 +181,11 @@ export default {
 			base64Data = encodeBase64(uniqueSet);
 		}
 
-		const now = Date.now();
-		const usedFlow = Math.floor(((EXPIRE_TIMESTAMP - now) / EXPIRE_TIMESTAMP * total * BYTES_PER_TB) / 2);
-		const totalFlow = total * BYTES_PER_TB;
-		const expireTime = Math.floor(EXPIRE_TIMESTAMP / 1000);
-
+		// 移除 Subscription-Userinfo 流量过期相关头与计算变量
 		const headers = {
 			"content-type": "text/plain; charset=utf-8",
 			"Profile-Update-Interval": String(SUBUpdateTime),
-			"Profile-web-page-url": urlObj.origin,
-			"Subscription-Userinfo": `upload=${usedFlow}; download=${usedFlow}; total=${totalFlow}; expire=${expireTime}`
+			"Profile-web-page-url": urlObj.origin
 		};
 		return new Response(base64Data, { headers });
 	}
