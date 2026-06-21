@@ -140,12 +140,13 @@ export default {
 			return new Response("Access Denied: Valid subscription token required", { status: 403 });
 		}
 
-		// 聚合绑定分组内所有节点生成订阅
+		// 聚合绑定分组内所有节点生成订阅（输出时给节点名加分组前缀，存储不变）
 		let allNodeText = "";
 		for (const gid of matchedBind.bindGroupIds) {
 			const g = groups.find(item => item.id === gid);
 			if (g && Array.isArray(g.nodes)) {
-				allNodeText += g.nodes.join('\n') + '\n';
+				const prefixedNodes = g.nodes.map(n => prefixNodeName(g.name, n));
+				allNodeText += prefixedNodes.join('\n') + '\n';
 			}
 		}
 
@@ -320,6 +321,69 @@ function encodeBase64(data) {
 function base64Decode(str) {
 	const bytes = new Uint8Array(atob(str).split('').map(c => c.charCodeAt(0)));
 	return new TextDecoder('utf-8').decode(bytes);
+}
+
+// 给一条节点链接的"节点名称"加上分组名前缀，格式 "[分组名]-原名"（仅改前缀，保留原名中所有空格）
+// 仅影响输出，不改存储
+function prefixNodeName(groupName, nodeLine) {
+	const line = (nodeLine || "").trim();
+	if (!line) return nodeLine || "";
+	const trimmedGroup = (groupName || "").trim();
+	const prefix = "[" + trimmedGroup + "]-";
+
+	// 1) vmess:// base64 JSON：修改 ps 字段
+	if (line.toLowerCase().startsWith("vmess://")) {
+		try {
+			const payload = line.slice("vmess://".length);
+			let jsonStr;
+			try {
+				jsonStr = base64Decode(payload);
+			} catch (e) {
+				return nodeLine;
+			}
+			const obj = JSON.parse(jsonStr);
+			const originalPs = (typeof obj.ps === "string" && obj.ps.length > 0) ? obj.ps : (trimmedGroup || "node");
+			if (originalPs.indexOf(prefix) === 0) {
+				return nodeLine;
+			}
+			obj.ps = prefix + originalPs;
+			const newJson = JSON.stringify(obj);
+			let newB64;
+			try {
+				newB64 = btoa(newJson);
+			} catch (e) {
+				newB64 = encodeBase64(newJson);
+			}
+			return "vmess://" + newB64;
+		} catch (e) {
+			return nodeLine;
+		}
+	}
+
+	// 2) 其它含 :// 的链接：名称在 # 之后的 fragment 中
+	if (line.indexOf("://") !== -1) {
+		const hashIdx = line.indexOf("#");
+		if (hashIdx !== -1) {
+			const head = line.slice(0, hashIdx);
+			const rawName = line.slice(hashIdx + 1);
+			let decodedName;
+			try {
+				decodedName = decodeURIComponent(rawName);
+			} catch (e) {
+				decodedName = rawName;
+			}
+			if (decodedName.indexOf(prefix) === 0) {
+				return nodeLine;
+			}
+			return head + "#" + prefix + decodedName;
+		} else {
+			// 没有 # 字段：补一个带前缀的名称
+			return line + "#" + prefix + (trimmedGroup || "node");
+		}
+	}
+
+	// 3) 其它无法识别的行：原样返回
+	return nodeLine;
 }
 
 // 管理面板页面渲染：订阅紧凑布局、点击复制、删除按钮同行右侧
